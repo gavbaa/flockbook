@@ -1,0 +1,131 @@
+{
+ "_about": [
+  "The first view of a log: how far back each reader goes when the end of the log holds no chat.",
+  "Sources/HerdrKit/SessionLog.swift (snapshots, the full tail) and xplat/flockbook-modfeed/src/tail.rs (read_last).",
+  "Read by Sources/HerdrKitChecks/ChecksTailVectors.swift and xplat/flockbook-modfeed/tests/tail_vectors.rs.",
+  "Each case is a log built from entries: `lines` (or one `line`), written `repeat` times (default 1), with {i} the",
+  "repeat's number (from 0) and {pad} that many q's. `want`: the user and assistant texts shown, in order. Synthetic."
+ ],
+ "tail_bytes": 2097152,
+ "search_max": 8388608,
+ "cases": [
+  {
+   "name": "a short log shows every message",
+   "entries": [
+    {
+     "line": "{\"type\":\"user\",\"uuid\":\"u0\",\"message\":{\"content\":\"question 0\"}}"
+    },
+    {
+     "line": "{\"type\":\"assistant\",\"uuid\":\"a0\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"answer 0\"}]}}"
+    }
+   ],
+   "want": [
+    "question 0",
+    "answer 0"
+   ]
+  },
+  {
+   "name": "a blob fills the last 2 MB: step back to the messages",
+   "entries": [
+    {
+     "line": "{\"type\":\"user\",\"uuid\":\"u0\",\"message\":{\"content\":\"question 0\"}}"
+    },
+    {
+     "line": "{\"type\":\"assistant\",\"uuid\":\"a0\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"answer 0\"}]}}"
+    },
+    {
+     "line": "{\"type\":\"api-request-blob\",\"sessionId\":\"s\",\"blob\":\"{pad}\"}",
+     "pad": 2500000
+    }
+   ],
+   "want": [
+    "question 0",
+    "answer 0"
+   ]
+  },
+  {
+   "name": "blobs fill 6 MB: still within the search",
+   "entries": [
+    {
+     "line": "{\"type\":\"user\",\"uuid\":\"u0\",\"message\":{\"content\":\"question 0\"}}"
+    },
+    {
+     "line": "{\"type\":\"assistant\",\"uuid\":\"a0\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"answer 0\"}]}}"
+    },
+    {
+     "line": "{\"type\":\"api-request-blob\",\"sessionId\":\"s\",\"blob\":\"{pad}\"}",
+     "pad": 1000000,
+     "repeat": 6
+    }
+   ],
+   "want": [
+    "question 0",
+    "answer 0"
+   ]
+  },
+  {
+   "name": "blobs fill 9 MB: the message is past the search",
+   "entries": [
+    {
+     "line": "{\"type\":\"user\",\"uuid\":\"u0\",\"message\":{\"content\":\"question 0\"}}"
+    },
+    {
+     "line": "{\"type\":\"assistant\",\"uuid\":\"a0\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"answer 0\"}]}}"
+    },
+    {
+     "line": "{\"type\":\"api-request-blob\",\"sessionId\":\"s\",\"blob\":\"{pad}\"}",
+     "pad": 1000000,
+     "repeat": 9
+    }
+   ],
+   "want": []
+  },
+  {
+   "name": "tool calls fill the last 2 MB: no step back",
+   "entries": [
+    {
+     "line": "{\"type\":\"user\",\"uuid\":\"u0\",\"message\":{\"content\":\"question 0\"}}"
+    },
+    {
+     "line": "{\"type\":\"assistant\",\"uuid\":\"a0\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"answer 0\"}]}}"
+    },
+    {
+     "lines": [
+      "{\"type\":\"assistant\",\"uuid\":\"x-a{i}\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"x-t{i}\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}]}}",
+      "{\"type\":\"user\",\"uuid\":\"x-r{i}\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"x-t{i}\",\"content\":\"{pad}\"}]}}"
+     ],
+     "pad": 100000,
+     "repeat": 30
+    }
+   ],
+   "want": []
+  },
+  {
+   "name": "tool calls before a blob: step back to a message",
+   "entries": [
+    {
+     "line": "{\"type\":\"user\",\"uuid\":\"u0\",\"message\":{\"content\":\"question 0\"}}"
+    },
+    {
+     "line": "{\"type\":\"assistant\",\"uuid\":\"a0\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"answer 0\"}]}}"
+    },
+    {
+     "lines": [
+      "{\"type\":\"assistant\",\"uuid\":\"y-a{i}\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"y-t{i}\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}]}}",
+      "{\"type\":\"user\",\"uuid\":\"y-r{i}\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"y-t{i}\",\"content\":\"{pad}\"}]}}"
+     ],
+     "pad": 100000,
+     "repeat": 25
+    },
+    {
+     "line": "{\"type\":\"api-request-blob\",\"sessionId\":\"s\",\"blob\":\"{pad}\"}",
+     "pad": 2500000
+    }
+   ],
+   "want": [
+    "question 0",
+    "answer 0"
+   ]
+  }
+ ]
+}
