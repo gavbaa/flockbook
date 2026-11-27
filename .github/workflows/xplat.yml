@@ -29,7 +29,7 @@ defaults:
     working-directory: xplat
 
 jobs:
-  # Whether a Rust file changed: a PR against its base commit at the event, a ci/ branch against main (their fork
+  # Whether a Rust file changed (or a fixture the Rust tests read: Tests/HerdrKitTests/Fixtures, Tests/Fixtures): a PR against its base commit at the event, a ci/ branch against main (their fork
   # point), main against its last push. A moved file counts by its old path too. A manual run, an API error, 300 files
   # or more (the compare's limit), a main push with no last push, or one that is not ahead of it: every job runs.
   changes:
@@ -71,7 +71,7 @@ jobs:
               echo "::notice title=xplat::main is $status against its last push: every job runs"
             else
               n=$(printf '%s\n' "$files" | grep -c . || true)
-              hit=$(printf '%s\n' "$files" | grep -E '^(xplat/|herdr-app/|Tests/HerdrKitTests/Fixtures/slash-tables\.json$|scripts/clippy-baseline\.|\.github/workflows/xplat\.yml$)' || true)
+              hit=$(printf '%s\n' "$files" | grep -E '^(xplat/|herdr-app/|Tests/HerdrKitTests/Fixtures/|Tests/Fixtures/|scripts/clippy-baseline\.|\.github/workflows/xplat\.yml$)' || true)
               if [ "$n" -lt 300 ] && [ -z "$hit" ]; then
                 rust=0
                 echo "::notice title=xplat jobs skipped::no Rust file changed against $BASE ($n files)"
