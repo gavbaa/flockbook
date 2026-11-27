@@ -1,0 +1,385 @@
+{
+ "_about": [
+  "The process tree and Claude Code pid files, as the resolvers read them: SessionResolver.parsePS and",
+  "claudeSessionSource (Sources/HerdrKit/SessionResolver.swift), resolver::parse_ps_in and claude_session_source_with",
+  "(xplat/herdr-core/src/resolver.rs). Read by Sources/HerdrKitChecks/ChecksResolverVectors.swift and",
+  "xplat/herdr-core/tests/resolver_vectors.rs. ps text is in UTC (as from another machine with TZ=UTC0).",
+  "Synthetic: no real hosts, users or sessions."
+ ],
+ "ps": [
+  {
+   "name": "a macOS line with its environment",
+   "text": "  501     1 Fri Nov 27 16:45:40 2026 /bin/zsh -l HERDR_PANE_ID=p1 HOME=/Users/dev\n",
+   "want": [
+    [
+     501,
+     1,
+     "2026-11-27T16:45:40Z",
+     "/bin/zsh -l HERDR_PANE_ID=p1 HOME=/Users/dev"
+    ]
+   ]
+  },
+  {
+   "name": "a one-digit day is padded with a space",
+   "text": "  900   899 Sat Nov  7 09:05:01 2026 claude\n",
+   "want": [
+    [
+     900,
+     899,
+     "2026-11-07T09:05:01Z",
+     "claude"
+    ]
+   ]
+  },
+  {
+   "name": "several lines, blank ones skipped",
+   "text": "\n  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n\n",
+   "want": [
+    [
+     899,
+     1,
+     "2026-11-27T17:20:59Z",
+     "-bash"
+    ],
+    [
+     900,
+     899,
+     "2026-11-27T17:21:07Z",
+     "claude"
+    ],
+    [
+     950,
+     900,
+     "2026-11-27T17:22:00Z",
+     "node /usr/lib/node_modules/x/mcp.js"
+    ]
+   ]
+  },
+  {
+   "name": "spaces inside the command are kept",
+   "text": "  900   899 Fri Nov 27 17:21:07 2026 claude  --resume   x\n",
+   "want": [
+    [
+     900,
+     899,
+     "2026-11-27T17:21:07Z",
+     "claude  --resume   x"
+    ]
+   ]
+  },
+  {
+   "name": "no command: skipped",
+   "text": "  900   899 Fri Nov 27 17:21:07 2026\n",
+   "want": []
+  },
+  {
+   "name": "no command but trailing spaces: skipped",
+   "text": "  900   899 Fri Nov 27 17:21:07 2026   \n",
+   "want": []
+  },
+  {
+   "name": "a pid that is not a number: skipped",
+   "text": "  PID  PPID STARTED COMMAND x y z w\n",
+   "want": []
+  },
+  {
+   "name": "not a month: skipped",
+   "text": "  900   899 Fri Foo 27 17:21:07 2026 claude\n",
+   "want": []
+  },
+  {
+   "name": "not a time: skipped",
+   "text": "  900   899 Fri Nov 27 17-21-07 2026 claude\n",
+   "want": []
+  },
+  {
+   "name": "lowercase names",
+   "text": "  900   899 fri nov 27 17:21:07 2026 claude\n",
+   "want": [
+    [
+     900,
+     899,
+     "2026-11-27T17:21:07Z",
+     "claude"
+    ]
+   ]
+  },
+  {
+   "name": "a one-digit hour",
+   "text": "  900   899 Sat Nov  7 9:05:01 2026 claude\n",
+   "want": [
+    [
+     900,
+     899,
+     "2026-11-07T09:05:01Z",
+     "claude"
+    ]
+   ]
+  },
+  {
+   "name": "two spaces before the command",
+   "text": "  900   899 Fri Nov 27 17:21:07 2026  claude\n",
+   "want": [
+    [
+     900,
+     899,
+     "2026-11-27T17:21:07Z",
+     "claude"
+    ]
+   ]
+  },
+  {
+   "name": "a day the month does not have: skipped",
+   "text": "  900   899 Tue Nov 31 17:21:07 2026 claude\n",
+   "want": []
+  },
+  {
+   "name": "an hour past 23: skipped",
+   "text": "  900   899 Fri Nov 27 24:21:07 2026 claude\n",
+   "want": []
+  },
+  {
+   "name": "the weekday is not checked against the date",
+   "text": "  900   899 Mon Nov 27 17:21:07 2026 claude\n",
+   "want": [
+    [
+     900,
+     899,
+     "2026-11-27T17:21:07Z",
+     "claude"
+    ]
+   ]
+  }
+ ],
+ "claude_session": [
+  {
+   "name": "macOS procStart text matches",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:07 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": [
+    "0b1c2d3e-aaaa-bbbb-cccc-000000000001",
+    900
+   ]
+  },
+  {
+   "name": "a one-digit day as Claude Code pads it",
+   "ps": "  900   899 Sat Nov  7 09:05:01 2026 claude\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Sat Nov  7 09:05:01 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": [
+    "0b1c2d3e-aaaa-bbbb-cccc-000000000001",
+    900
+   ]
+  },
+  {
+   "name": "found from the shell, in the process tree",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    899
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:07 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": [
+    "0b1c2d3e-aaaa-bbbb-cccc-000000000001",
+    900
+   ]
+  },
+  {
+   "name": "2 s apart still matches",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:09 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": [
+    "0b1c2d3e-aaaa-bbbb-cccc-000000000001",
+    900
+   ]
+  },
+  {
+   "name": "3 s apart: a reused pid, no match",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:10 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "two files with one session: the first in search order",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    899
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:07 2026\", \"cwd\": \"/home/dev/app\"}",
+    "950": "{\"pid\": 950, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:22:00 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": [
+    "0b1c2d3e-aaaa-bbbb-cccc-000000000001",
+    900
+   ]
+  },
+  {
+   "name": "two sessions in one tree: none",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    899
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:07 2026\", \"cwd\": \"/home/dev/app\"}",
+    "950": "{\"pid\": 950, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000002\", \"procStart\": \"Fri Nov 27 17:22:00 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "the file names another pid",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 901, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:07 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "the pid as a string",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": \"900\", \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:07 2026\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "a session id with a slash",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"../0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:07 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "an empty session id",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"\", \"procStart\": \"Fri Nov 27 17:21:07 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "no procStart",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "not JSON",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 900,"
+   },
+   "want": null
+  },
+  {
+   "name": "a pid not in ps",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    700
+   ],
+   "files": {
+    "700": "{\"pid\": 700, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"Fri Nov 27 17:21:07 2026\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "Linux: procStart in clock ticks after boot",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "clock": {
+    "btime": 1788008817,
+    "hz": 100
+   },
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"779125042\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": [
+    "0b1c2d3e-aaaa-bbbb-cccc-000000000001",
+    900
+   ]
+  },
+  {
+   "name": "Linux: ticks of a reused pid",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "clock": {
+    "btime": 1788008817,
+    "hz": 100
+   },
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"779126042\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "Linux: ticks without the machine's clock",
+   "ps": "  899     1 Fri Nov 27 17:20:59 2026 -bash\n  900   899 Fri Nov 27 17:21:07 2026 claude\n  950   900 Fri Nov 27 17:22:00 2026 node /usr/lib/node_modules/x/mcp.js\n",
+   "pids": [
+    900
+   ],
+   "files": {
+    "900": "{\"pid\": 900, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"779125042\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": null
+  },
+  {
+   "name": "Windows: procStart as a FILETIME",
+   "ps": "17144  1000 Fri Nov 20 22:54:37 2026 claude.exe\n",
+   "pids": [
+    17144
+   ],
+   "files": {
+    "17144": "{\"pid\": 17144, \"sessionId\": \"0b1c2d3e-aaaa-bbbb-cccc-000000000001\", \"procStart\": \"134396888779841927\", \"cwd\": \"/home/dev/app\"}"
+   },
+   "want": [
+    "0b1c2d3e-aaaa-bbbb-cccc-000000000001",
+    17144
+   ]
+  }
+ ]
+}

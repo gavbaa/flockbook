@@ -379,11 +379,20 @@ public actor SessionResolver {
         var out: [Proc] = []
         for raw in text.split(separator: "\n") {
             let w = raw.split(separator: " ", maxSplits: 7, omittingEmptySubsequences: true)
-            guard w.count == 8, let pid = Int32(w[0]), let ppid = Int32(w[1]),
+            // DateFormatter takes 17-21-07 for a time: check the clock is h:m:s first (as the Rust resolver does).
+            guard w.count == 8, let pid = Int32(w[0]), let ppid = Int32(w[1]), isClock(w[5]),
                   let start = f.date(from: w[2...6].joined(separator: " ")) else { continue }
-            out.append(Proc(pid: pid, ppid: ppid, start: start, line: String(w[7])))
+            let line = w[7].drop { $0 == " " }
+            guard !line.isEmpty else { continue }
+            out.append(Proc(pid: pid, ppid: ppid, start: start, line: String(line)))
         }
         return out
+    }
+
+    /// `HH:mm:ss` of `ps lstart`: three parts of one or two digits.
+    private static func isClock(_ s: Substring) -> Bool {
+        let t = s.split(separator: ":", omittingEmptySubsequences: false)
+        return t.count == 3 && t.allSatisfy { (1...2).contains($0.count) && $0.utf8.allSatisfy { (48...57).contains($0) } }
     }
 
     /// The agent process of a pane: the newest direct child of the pane's shell (the topmost process that carries
