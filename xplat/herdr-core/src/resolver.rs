@@ -764,14 +764,14 @@ fn parse_lstart(words: &[&str]) -> Option<NaiveDateTime> {
 /// (clock ticks after boot) instead, and on Windows the creation time as a FILETIME (100 ns after 1601-01-01 UTC).
 /// The two numbers are told apart by size: a FILETIME after 1632 is at least 10^16; ticks after boot reach that only
 /// after some 3 million years at 100 Hz.
-fn proc_start(ps: &str) -> Option<Date> {
+fn proc_start(ps: &str, ticks: &impl Fn(u64) -> Option<Date>) -> Option<Date> {
     if !ps.is_empty() && ps.bytes().all(|b| b.is_ascii_digit()) {
         let n: u64 = ps.parse().ok()?;
         if n >= 10_000_000_000_000_000 {
             const UNIX_EPOCH_S: i64 = 11_644_473_600; // 1601-01-01 to 1970-01-01
             return DateTime::<Utc>::from_timestamp((n / 10_000_000) as i64 - UNIX_EPOCH_S, (n % 10_000_000) as u32 * 100);
         }
-        return linux::ticks_to_date(n);
+        return ticks(n);
     }
     let words: Vec<&str> = ps.split(' ').filter(|w| !w.is_empty()).collect();
     parse_lstart(&words).and_then(|n| local_to_utc(&Utc, &n))
@@ -1038,6 +1038,17 @@ pub fn claude_session_source_with(
     procs: &[Proc],
     read: impl Fn(i32) -> Option<Vec<u8>>,
 ) -> Option<(String, i32)> {
+    claude_session_source_with_ticks(pids, procs, linux::ticks_to_date, read)
+}
+
+/// `claude_session_source_with`, a Linux `procStart` in clock ticks dated by `ticks` instead of this machine's boot
+/// time (another machine's clock, or a test's).
+pub fn claude_session_source_with_ticks(
+    pids: &[i32],
+    procs: &[Proc],
+    ticks: impl Fn(u64) -> Option<Date>,
+    read: impl Fn(i32) -> Option<Vec<u8>>,
+) -> Option<(String, i32)> {
     let mut by_pid: HashMap<i32, &Proc> = HashMap::new();
     for p in procs {
         by_pid.entry(p.pid).or_insert(p);
@@ -1059,7 +1070,7 @@ pub fn claude_session_source_with(
             continue;
         }
         let Some(ps) = o.get("procStart").and_then(|v| v.as_str()) else { continue };
-        let Some(ps) = proc_start(ps) else { continue };
+        let Some(ps) = proc_start(ps, &ticks) else { continue };
         if (ps - proc_.start).num_milliseconds().abs() > 2000 {
             continue;
         }
