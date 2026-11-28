@@ -70,7 +70,8 @@ public final class SessionLog: Sendable {
     }
 
     /// `loadEarlier` that reads at most `limit` bytes back: nil when the line before the start is longer than that.
-    private func loadEarlier(bytes: Int, within limit: UInt64) async -> EarlierLoadResult? {
+    /// `reparse` false moves the start without parsing the range again (the step back parses only what it loaded).
+    private func loadEarlier(bytes: Int, within limit: UInt64, reparse: Bool = true) async -> EarlierLoadResult? {
         let (url, start, mirror): (URL?, UInt64, RemoteLogMirror?) = state.lock.withLock { (state.loaded ? state.url : nil, state.start, state.mirror) }
         guard let url, start > 0 else { return .end }
         guard let fh = try? FileHandle(forReadingFrom: url) else { return .failed }
@@ -107,7 +108,7 @@ public final class SessionLog: Sendable {
             let more: Bool = state.lock.withLock {
                 guard state.start == start else { return state.start > 0 }    // another load or a reset won
                 state.start = newStart
-                state.dirty = true
+                if reparse { state.dirty = true }
                 return newStart > 0
             }
             state.lock.withLock { state.wake }?()
@@ -482,21 +483,41 @@ public final class SessionLog: Sendable {
                         // Big lines that are not chat fill the last 2 MB (an api-request-blob) and they parse to no item:
                         // load the 2 MB before them, and so on until a message is in, never more than `searchMax` back
                         // (the mod's helper does the same: tail::read_last). A tail with any item (a long turn of tool
-                        // calls) does not step back. Each load wakes this loop, which parses the range again and looks once more.
+                        // calls) does not step back. Each step parses only the chunk it loaded, to look for a message; when the
+                        // search ends, the whole range is parsed once (a tool result in a later chunk still finds its call).
+                        // Each load wakes this loop, which looks once more.
+                        func endStepBack() {
+                            stepBack = false
+                            if stepping { state.lock.withLock { state.dirty = true }; watch.poke() }
+                        }
                         if stepBack, total > first, let room = state.lock.withLock({ () -> UInt64? in
                             guard state.wantFull, state.start > 0 else { return nil }
                             let have = state.consumed - state.start
                             return have < Self.searchMax ? Self.searchMax - have : 0
                         }) {
-                            let items = parser.items()
-                            let done = stepping ? items.contains(where: Self.isMessage) : tailHasItems ?? !items.isEmpty
-                            if done || room == 0 { stepBack = false } else {
+                            if !stepping, tailHasItems ?? !parser.items().isEmpty { stepBack = false }
+                            else if room == 0 { endStepBack() }
+                            else {
                                 stepping = true
-                                // The log's start, or a line longer than what is left of the search, ends it. A failed
-                                // read (ssh down) tries again on a later wake.
-                                switch await self.loadEarlier(bytes: Int(min(Self.fullTail, room)), within: room) {
-                                case .end, nil: stepBack = false
-                                case .more, .failed: break
+                                let before = state.lock.withLock { state.start }
+                                let res = await self.loadEarlier(bytes: Int(min(Self.fullTail, room)), within: room, reparse: false)
+                                let after = state.lock.withLock { state.start }
+                                var found = false
+                                if after < before {
+                                    try? fh.seek(toOffset: after)
+                                    let data = (try? fh.read(upToCount: Int(before - after))) ?? Data()
+                                    var chunk = ConversationParser()
+                                    for raw in data.split(separator: 0x0A, omittingEmptySubsequences: false) {
+                                        if let t = String(data: raw, encoding: .utf8) { chunk.feed(line: t) }
+                                    }
+                                    found = chunk.items().contains(where: Self.isMessage)
+                                }
+                                // A message, the log's start, or a line longer than what is left of the search ends it.
+                                // A failed read (ssh down) tries again on a later wake.
+                                switch res {
+                                case .end, nil: endStepBack()
+                                case .more: if found { endStepBack() }
+                                case .failed: break
                                 }
                             }
                         }
