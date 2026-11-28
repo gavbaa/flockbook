@@ -66,11 +66,22 @@ public final class SessionLog: Sendable {
     /// Distinguishes more content, the beginning of the log, and a failed read (including a disconnected host).
     @discardableResult
     public func loadEarlier(bytes: Int = 2_000_000) async -> EarlierLoadResult {
+        await loadEarlier(bytes: bytes, within: .max) ?? .failed
+    }
+
+    /// `loadEarlier` that reads at most `limit` bytes back: nil when the line before the start is longer than that.
+    /// `reparse` false moves the start without parsing the range again (the step back parses only what it loaded).
+    private func loadEarlier(bytes: Int, within limit: UInt64, reparse: Bool = true) async -> EarlierLoadResult? {
         let (url, start, mirror): (URL?, UInt64, RemoteLogMirror?) = state.lock.withLock { (state.loaded ? state.url : nil, state.start, state.mirror) }
         guard let url, start > 0 else { return .end }
         guard let fh = try? FileHandle(forReadingFrom: url) else { return .failed }
         defer { try? fh.close() }
-        var span = UInt64(max(bytes, 1))
+        var span = min(UInt64(max(bytes, 1)), limit)
+        func widen() -> Bool {
+            guard span < limit else { return false }
+            span = span > limit / 2 ? limit : span * 2
+            return true
+        }
         while true {
             let from = start > span ? start - span : 0
             // Fetch before reading the sparse mirror: a failed host read cannot advance the loaded range.
@@ -85,17 +96,19 @@ public final class SessionLog: Sendable {
                 if prev != 0x0A {
                     guard let nl = data.firstIndex(of: 0x0A) else {          // one line longer than the span: widen
                         if from == 0 { return .failed }
-                        span *= 2; continue
+                        if widen() { continue } else { return nil }
                     }
                     newStart = from + UInt64(data.distance(from: data.startIndex, to: nl)) + 1
                     data = Data(data[(nl + 1)...])
                 }
             }
-            if newStart == start && from > 0 { span *= 2; continue }          // nothing whole in this span: widen
+            if newStart == start && from > 0 {                                // nothing whole in this span: widen
+                if widen() { continue } else { return nil }
+            }
             let more: Bool = state.lock.withLock {
                 guard state.start == start else { return state.start > 0 }    // another load or a reset won
                 state.start = newStart
-                state.dirty = true
+                if reparse { state.dirty = true }
                 return newStart > 0
             }
             state.lock.withLock { state.wake }?()
@@ -142,6 +155,10 @@ public final class SessionLog: Sendable {
     static let fullTail: UInt64 = 2 * 1024 * 1024
     /// How far back the full tail may step when it holds no message (`snapshots`).
     static let searchMax: UInt64 = 8 * 1024 * 1024
+    /// The owner's or the agent's text: what the step back looks for (the helper's `tail::has_message`).
+    static func isMessage(_ i: ConversationItem) -> Bool {
+        switch i.kind { case .userText, .assistantText: return true; default: return false }
+    }
 
     /// Pure parse for tests.
     public static func parse(lines: [String]) -> [ConversationItem] {
@@ -334,6 +351,8 @@ public final class SessionLog: Sendable {
                 var skipPartial = false
                 var backfill = false
                 var stepBack = true   // the full tail may still step back past big lines that are not chat
+                var tailHasItems: Bool?   // the lines in the last `fullTail` bytes parse to an item: no step back
+                var stepping = false      // stepping back, until a message is in
                 var url: URL?
                 var mirror: RemoteLogMirror?
                 var gone = 0   // syncs in a row where the host said the file is not there
@@ -344,7 +363,7 @@ public final class SessionLog: Sendable {
                 }
                 func reset() {
                     offset = 0; leftover = Data(); leftoverPos = 0; parser = ConversationParser(); started = false
-                    skipPartial = false; backfill = false; stepBack = true
+                    skipPartial = false; backfill = false; stepBack = true; tailHasItems = nil; stepping = false
                     state.lock.withLock { state.start = 0; state.consumed = 0; state.loaded = false; state.dirty = false }
                 }
                 reset()
@@ -446,20 +465,61 @@ public final class SessionLog: Sendable {
                             try? fh.seek(toOffset: from)
                             let data = (try? fh.read(upToCount: Int(to - from))) ?? Data()
                             var pos = from
+                            // The first full tail can start before its 2 MB (a load widens to a whole line): what the
+                            // step back looks at is the lines that start within them, as the helper reads them.
+                            let tailFrom = to > Self.fullTail ? to - Self.fullTail : 0
+                            var tail: ConversationParser? = stepBack && tailHasItems == nil && state.lock.withLock({ state.wantFull })
+                                ? ConversationParser() : nil
                             for raw in data.split(separator: 0x0A, omittingEmptySubsequences: false).dropLast() {
-                                if let t = String(data: raw, encoding: .utf8) { parser.feed(line: t, offset: pos) }
+                                if let t = String(data: raw, encoding: .utf8) {
+                                    parser.feed(line: t, offset: pos)
+                                    if pos >= tailFrom { tail?.feed(line: t, offset: pos) }
+                                }
                                 pos += UInt64(raw.count) + 1
                             }
+                            if let tail { tailHasItems = !tail.items().isEmpty }
                             cont.yield(Snapshot(items: parser.items(), hasOpenToolUse: parser.hasOpenToolUse, queued: parser.queue))
                         }
-                        // Big lines that are not chat fill the tail (an api-request-blob) and it parses to no item: load the
-                        // 2 MB before it, up to `searchMax` back, until an item is in (the mod's helper does the same:
-                        // tail::read_last). Each load wakes this loop, which parses the range again and looks once more.
-                        if stepBack, total > first,
-                           state.lock.withLock({ state.wantFull && state.start > 0 && state.consumed - state.start < Self.searchMax }),
-                           parser.items().isEmpty {
-                            // Only the log's start ends the search. A failed read (ssh down) tries again on a later wake.
-                            if await self.loadEarlier(bytes: Int(Self.fullTail)) == .end { stepBack = false }
+                        // Big lines that are not chat fill the last 2 MB (an api-request-blob) and they parse to no item:
+                        // load the 2 MB before them, and so on until a message is in, never more than `searchMax` back
+                        // (the mod's helper does the same: tail::read_last). A tail with any item (a long turn of tool
+                        // calls) does not step back. Each step parses only the chunk it loaded, to look for a message; when the
+                        // search ends, the whole range is parsed once (a tool result in a later chunk still finds its call).
+                        // Each load wakes this loop, which looks once more.
+                        func endStepBack() {
+                            stepBack = false
+                            if stepping { state.lock.withLock { state.dirty = true }; watch.poke() }
+                        }
+                        if stepBack, total > first, let room = state.lock.withLock({ () -> UInt64? in
+                            guard state.wantFull, state.start > 0 else { return nil }
+                            let have = state.consumed - state.start
+                            return have < Self.searchMax ? Self.searchMax - have : 0
+                        }) {
+                            if !stepping, tailHasItems ?? !parser.items().isEmpty { stepBack = false }
+                            else if room == 0 { endStepBack() }
+                            else {
+                                stepping = true
+                                let before = state.lock.withLock { state.start }
+                                let res = await self.loadEarlier(bytes: Int(min(Self.fullTail, room)), within: room, reparse: false)
+                                let after = state.lock.withLock { state.start }
+                                var found = false
+                                if after < before {
+                                    try? fh.seek(toOffset: after)
+                                    let data = (try? fh.read(upToCount: Int(before - after))) ?? Data()
+                                    var chunk = ConversationParser()
+                                    for raw in data.split(separator: 0x0A, omittingEmptySubsequences: false) {
+                                        if let t = String(data: raw, encoding: .utf8) { chunk.feed(line: t) }
+                                    }
+                                    found = chunk.items().contains(where: Self.isMessage)
+                                }
+                                // A message, the log's start, or a line longer than what is left of the search ends it.
+                                // A failed read (ssh down) tries again on a later wake.
+                                switch res {
+                                case .end, nil: endStepBack()
+                                case .more: if found { endStepBack() }
+                                case .failed: break
+                                }
+                            }
                         }
                     }
                     if let moveTo { watch.disarm(); url = moveTo; reset(); continue }
